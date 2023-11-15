@@ -13,7 +13,23 @@ const userSchema = new mongoose.Schema({
 isActive:{
   type:Boolean,
   default:true,
-}
+},
+following: [
+  {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
+],
+notifications: [
+  {
+    followerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    message: String,
+  },
+],
 });
 
 const User = mongoose.model('User', userSchema);
