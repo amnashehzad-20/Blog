@@ -67,6 +67,7 @@ router.post('/login', async (req, res) => {
       } else {
         return res.status(401).send("Invalid password or email.");
       }
+
     } catch (error) {
       console.error(error);
       return res.status(500).send("Internal Server Error");
@@ -114,10 +115,11 @@ router.get('/getProfile/:userid' , async (req, res) => {
 });
 
 //update user profile
-router.put('/updateProfile/:userid', async (req, res) => {
+router.put('/updateProfile/:userid',AuthenticateUser , async (req, res) => {
     try {
-        console.log("im in uodate")
-      const updatedProfile = await User.findByIdAndUpdate(req.params.userid, { name:req.body.name , description:req.body.description ,email:req.body.email }, { new: true });
+        const x=req.User.email;
+        const user=await User.findOne({email:req.User.email})
+      const updatedProfile = await User.findByIdAndUpdate(user._id, { name:req.body.name , description:req.body.description ,email:req.body.email }, { new: true });
       if (!updatedProfile) {
         return res.status(404).json({ message: 'Post not found.' });
     
@@ -164,33 +166,54 @@ router.get('/getPost/:postid', async (req, res) => {
   });
 
 //update a post 
-router.put('/updateblog/:postid', async (req, res) => {
+router.put('/updateblog/:postid',AuthenticateUser, async (req, res) => {
     try {
-      const updatedPost = await Blog.findByIdAndUpdate(req.params.postid, { title:req.body.title , description:req.body.description ,category:req.body.category }, { new: true });
+      const x=await User.findOne({email: req.User.email});
+      const postId = req.params.postid;
+      const post = await Blog.findById(postId);
+      if (!post) {
+        return res.status(404).json({ message: 'Blog post not found.' });
+      }
+      if(post.authorid.equals(x._id) )
+{ 
+      const updatedPost = await Blog.findByIdAndUpdate(post._id, { title:req.body.title , description:req.body.description ,category:req.body.category }, { new: true });
       if (!updatedPost) {
         return res.status(404).json({ message: 'Post not found.' });
     
       }
+    }
+    else{
+      return res.status(404).json({ message: 'You cannot update the post' });
+    }
     } catch (error) {
-        return res.status(500).json({ message: 'Internal Server Error' });
+        return res.status(500).json({ message: 'Internal Server Error',error:error.message });
     }
   });
 //delete a post
-router.delete('/deletePost/:postid', async (req, res) => {
-    const postId = req.params.postid;
-  
+router.delete('/deletePost/:postid',AuthenticateUser, async (req, res) => {
+  const x=await User.findOne({email: req.User.email}); 
+  const postId = req.params.postid;
     try {
       const post = await Blog.findById(postId);
-  
       if (!post) {
         return res.status(404).json({ message: 'Blog post not found.' });
       }
-      await Blog.findByIdAndDelete(postId);
-      return res.status(200).json({ message: 'Blog post deleted successfully.' });
+  
+      
+ if(post.authorid.equals(x._id) )
+{ 
+    await Blog.findByIdAndDelete(postId);
+    return res.status(200).json({ message: 'Blog post deleted successfully.' });
+  } 
+    else {
+      return res.status(404).json({ message: 'You cannot delete the post' });
+
+    }
     } catch (error) {
       console.error(error);
       return res.status(500).json({ message: 'Internal Server Error', error: error.message });
     }
+   
   });
 
 //get all post of a certain author
@@ -329,6 +352,12 @@ router.post('/postcomments/:postid', async (req, res) => {
             post.comments.push({ user:user, comment:comment }); //push a new obj in rating arr
         }
         await post.save();
+        const author=await User.findById(post.authorid);
+        author.notifications.push({
+          followerId:user,
+          message: 'New comment!',
+        });
+        await author.save();
         return res.json(post);
     } catch (error) {
         return res.status(500).json({ message: 'Internal Server Error' ,error:error.message});
@@ -395,7 +424,6 @@ router.get('/searchPosts', async (req, res) => { //searchPosts?searchBy=category
       if (filterBy === 'category') {
         blogs = await Blog.find({ category: keyword });
       } else if (filterBy === 'author') {
-        // Assuming keyword is the authorid, you may need to adjust accordingly
         blogs = await Blog.find({ authorid: keyword });
       } else {
         return res.status(400).json({ message: 'Invalid sorting parameter.' });
@@ -437,6 +465,85 @@ router.get('/sortresult',searchmiddleware, async (req, res) => { //getsortedPost
       return res.status(500).json({ message: 'Internal Server Error' });
     }
   });
+
+////--------------------------User Interaction Module---------------------------////
+//follow a blogger
+router.post('/follow/:userId', async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.body.email });
+    const userToFollow = await User.findById(req.params.userId);
+
+    if (!userToFollow) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (!user.following.includes(req.params.userId)) {
+      user.following.push(req.params.userId);
+      await user.save(); 
+
+    userToFollow.notifications.push({       //follow notification
+      followerId:user,
+      message: 'New follower!',
+    });
+    await userToFollow.save();
+      return res.status(200).json({ message: "You are now following this blogger." });
+    } else {
+      return res.status(404).json({ message: 'You are already following this blogger.' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+
+//unfollow a blogger
+router.post('/unfollow/:userId', async (req, res) => {
+  try {
+    const user=await User.findOne({email:req.body.email})
+    const alreadyFollow = await User.findById(req.params.userId);
+
+    if (!alreadyFollow ) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (!user.following.includes(alreadyFollow)) {
+      user.following.pull(alreadyFollow);
+      await user.save();
+      alreadyFollow.notifications.push({       //follow notification
+        followerId:user,
+        message: 'You just lost a follower!',
+      });
+      await alreadyFollow.save();
+      return res.status(200).json({ message: "You are no longer following this blogger." });
+    } else {
+      return res.status(404).json({ message: 'You donot follow this blogger.' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+// User feed 
+router.get('/userfeed',async (req, res) => {
+  try {
+    const user=await User.findOne({email:req.body.email})
+    if (!user || !user.following || user.following.length === 0) {
+      return res.status(200).json({ message: 'No posts to display in the user feed.' });
+    }
+    const followedId =user.following.map((blogger) => blogger._id);
+    const post = await Blog.find({ authorid: followedId });
+    return res.status(200).json(post);
+   
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+//notfication
+
 
 
 ///---------------------------Admin Operations------------------------------------///
